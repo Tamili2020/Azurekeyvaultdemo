@@ -53,7 +53,7 @@
 // DB Connection
 $serverName = "tcp:mydemovm.database.windows.net,1433";
 $connectionOptions = array(
-    "Database" => "mydemodb",
+    "Database" => "azureadmin",
     "Uid" => "azureadmin",
     "PWD" => "Welcome@123456",
     "Encrypt" => true,
@@ -178,3 +178,4 @@ sqlsrv_close($conn);
 ?>
 </body>
 </html>
+
