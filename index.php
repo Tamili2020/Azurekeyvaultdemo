@@ -1,55 +1,77 @@
 <?php
 // ==========================
-// 🔹 Load Azure Key Vault Secrets
+// 🔹 Load Dependencies
 // ==========================
-
 require 'vendor/autoload.php';
 use GuzzleHttp\Client;
 
-// ✅ Read credentials from Azure App Service environment variables
-$tenantId     = getenv('TENANT_ID');
-$clientId     = getenv('CLIENT_ID');
-$clientSecret = getenv('CLIENT_SECRET');
-$vaultName    = getenv('VAULT_NAME');
-
 // ==========================
-// 🔹 Get Access Token from Azure AD
+// 🔹 Environment Variables from App Service
 // ==========================
-$client = new Client();
-$tokenResponse = $client->request('POST', "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token", [
-    'form_params' => [
-        'grant_type'    => 'client_credentials',
-        'client_id'     => $clientId,
-        'client_secret' => $clientSecret,
-        'scope'         => 'https://vault.azure.net/.default'
-    ]
-]);
-
-$tokenData = json_decode($tokenResponse->getBody(), true);
-$accessToken = $tokenData['access_token'];
-
-// ==========================
-// 🔹 Get SQL credentials from Key Vault
-// ==========================
-function getSecret($vaultName, $secretName, $accessToken) {
-    $client = new Client();
-    $url = "https://$vaultName.vault.azure.net/secrets/$secretName?api-version=7.4";
-    $response = $client->request('GET', $url, [
-        'headers' => [
-            'Authorization' => "Bearer $accessToken"
-        ]
-    ]);
-    $secretData = json_decode($response->getBody(), true);
-    return $secretData['value'];
+$tenantId     = getenv('TENANT_ID');      // e.g. xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+$clientId     = getenv('CLIENT_ID');      // App Registration (Service Principal) ID
+$clientSecret = getenv('CLIENT_SECRET');  // App Registration Secret
+$vaultName    = getenv('VAULT_NAME');     // Key Vault Name (no https://)
+if (!$tenantId || !$clientId || !$clientSecret || !$vaultName) {
+    die("❌ Missing one or more environment variables (TENANT_ID, CLIENT_ID, CLIENT_SECRET, VAULT_NAME).");
 }
 
-$sqlUsername = getSecret($vaultName, 'sql-username', $accessToken);
-$sqlPassword = getSecret($vaultName, 'sql-password', $accessToken);
-$sqlServer   = getSecret($vaultName, 'sql-server', $accessToken);
-$sqlDatabase = getSecret($vaultName, 'sql-database', $accessToken);
+// ==========================
+// 🔹 Step 1: Get Azure AD Access Token
+// ==========================
+try {
+    $client = new Client();
+    $tokenResponse = $client->request('POST', "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token", [
+        'form_params' => [
+            'grant_type'    => 'client_credentials',
+            'client_id'     => $clientId,
+            'client_secret' => $clientSecret,
+            'scope'         => 'https://vault.azure.net/.default'
+        ]
+    ]);
+
+    $tokenData = json_decode($tokenResponse->getBody(), true);
+    if (!isset($tokenData['access_token'])) {
+        throw new Exception("No access token received from Azure AD.");
+    }
+    $accessToken = $tokenData['access_token'];
+} catch (Exception $e) {
+    die("❌ Failed to get access token: " . $e->getMessage());
+}
 
 // ==========================
-// 🔹 Connect to Azure SQL Database
+// 🔹 Step 2: Function to Get Secrets from Key Vault
+// ==========================
+function getSecret($vaultName, $secretName, $accessToken) {
+    try {
+        $client = new Client();
+        $url = "https://$vaultName.vault.azure.net/secrets/$secretName?api-version=7.4";
+        $response = $client->request('GET', $url, [
+            'headers' => [
+                'Authorization' => "Bearer $accessToken"
+            ]
+        ]);
+        $secretData = json_decode($response->getBody(), true);
+        return $secretData['value'] ?? null;
+    } catch (Exception $e) {
+        die("❌ Failed to fetch secret '$secretName': " . $e->getMessage());
+    }
+}
+
+// ==========================
+// 🔹 Step 3: Fetch SQL Credentials
+// ==========================
+$sqlUsername = getSecret($vaultName, 'sql-username', $accessToken);
+$sqlPassword = getSecret($vaultName, 'sql-password', $accessToken);
+$sqlServer   = getSecret($vaultName, 'sql-server', $accessToken); // Format: myserver.database.windows.net
+$sqlDatabase = getSecret($vaultName, 'sql-database', $accessToken);
+
+if (!$sqlUsername || !$sqlPassword || !$sqlServer || !$sqlDatabase) {
+    die("❌ One or more SQL credentials are missing from Key Vault.");
+}
+
+// ==========================
+// 🔹 Step 4: Connect to Azure SQL Database
 // ==========================
 $connectionInfo = [
     "Database" => $sqlDatabase,
@@ -58,19 +80,19 @@ $connectionInfo = [
     "Encrypt"  => "Yes",
     "TrustServerCertificate" => 0
 ];
-
 $conn = sqlsrv_connect($sqlServer, $connectionInfo);
 if (!$conn) {
-    die(print_r(sqlsrv_errors(), true));
+    die("❌ Database connection failed: " . print_r(sqlsrv_errors(), true));
 }
 
 // ==========================
-// 🔹 Handle Search Form
+// 🔹 Step 5: Handle Search Form
 // ==========================
-$lastname   = isset($_GET['lastname']) ? $_GET['lastname'] : '';
-$department = isset($_GET['department']) ? $_GET['department'] : '';
+$lastname   = isset($_GET['lastname']) ? trim($_GET['lastname']) : '';
+$department = isset($_GET['department']) ? trim($_GET['department']) : '';
 
-$sql = "SELECT EmployeeID, FirstName, LastName, Department, Email FROM Employees WHERE 1=1";
+$sql = "SELECT EmployeeID, FirstName, LastName, Department, Email 
+        FROM Employees WHERE 1=1";
 $params = [];
 
 if (!empty($lastname)) {
@@ -84,10 +106,9 @@ if (!empty($department)) {
 
 $stmt = sqlsrv_query($conn, $sql, $params);
 if ($stmt === false) {
-    die(print_r(sqlsrv_errors(), true));
+    die("❌ Query failed: " . print_r(sqlsrv_errors(), true));
 }
 ?>
-
 <!DOCTYPE html>
 <html>
 <head>
