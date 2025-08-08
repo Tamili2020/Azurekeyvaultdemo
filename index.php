@@ -117,7 +117,7 @@ function makeHttpRequest($url, $method = 'GET', $data = null, $headers = []) {
 // Azure Key Vault + Azure AD app details
 $tenantId     = "2817eb0c-e3e7-4403-9e0b-171f475e2b9c";  // YOUR_TENANT_ID
 $clientId     = "e674564e-6c0f-432e-82ae-8d8e56400c31";  // YOUR_APP_REGISTRATION_CLIENT_ID
-$clientSecret = "c045b0fa-ebba-4241-86ce-6d9a2aa917c4";  // YOUR_APP_REGISTRATION_CLIENT_SECRET
+$clientSecret = "3E-8Q~Zim8-rwlFM3mv1kWAmKHJjFen4VWoHGaaM";  // YOUR_APP_REGISTRATION_CLIENT_SECRET
 $vaultName    = "mydemokeyvaultwebapp"; // YOUR_KEY_VAULT_NAME_ONLY
 
 // Initialize variables
@@ -510,3 +510,4 @@ if ($conn) {
 
 </body>
 </html>
+
