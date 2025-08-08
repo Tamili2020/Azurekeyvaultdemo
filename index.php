@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Azure SQL Employee Portal</title>
+    <title>Azure SQL Employee Portal (Key Vault Secured)</title>
     <style>
         body {
             font-family: Arial;
@@ -41,31 +41,85 @@
     </style>
 </head>
 <body>
-    <h1>Azure SQL Employee Portal</h1>
-
-    <!-- Buttons -->
-    <form method="post">
-        <button class="btn" name="show_form" value="1">Add Employee</button>
-        <button class="btn" name="show_list" value="1">Employee List</button>
-    </form>
+<h1>Azure SQL Employee Portal 🔐</h1>
 
 <?php
-// DB Connection
+// ==========================
+// 🔹 Load Azure Key Vault Secrets
+// ==========================
+require 'vendor/autoload.php'; // Composer autoload (Guzzle)
+use GuzzleHttp\Client;
+
+// Azure Key Vault + Azure AD app details
+$tenantId     = "2817eb0c-e3e7-4403-9e0b-171f475e2b9c";  #YOUR_TENANT_ID
+$clientId     = "e674564e-6c0f-432e-82ae-8d8e56400c31"; # YOUR_APP_REGISTRATION_CLIENT_ID
+$clientSecret = "c045b0fa-ebba-4241-86ce-6d9a2aa917c4"; # YOUR_APP_REGISTRATION_CLIENT_SECRET
+$vaultName    = "mydemokeyvaultwebapp"; // no https://, no .vault.azure.net , YOUR_KEY_VAULT_NAME_ONLY
+
+try {
+    // 1️⃣ Get Azure AD token
+    $http = new Client();
+    $response = $http->post("https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token", [
+        'form_params' => [
+            'grant_type'    => 'client_credentials',
+            'client_id'     => $clientId,
+            'client_secret' => $clientSecret,
+            'scope'         => 'https://vault.azure.net/.default'
+        ]
+    ]);
+    $token = json_decode($response->getBody(), true)['access_token'];
+
+    // 2️⃣ Function to retrieve secret value
+    function getSecret($secretName, $token, $vaultName) {
+        $http = new Client();
+        $url = "https://$vaultName.vault.azure.net/secrets/$secretName?api-version=7.3";
+        $response = $http->get($url, [
+            'headers' => [
+                'Authorization' => "Bearer $token"
+            ]
+        ]);
+        $data = json_decode($response->getBody(), true);
+        return $data['value'];
+    }
+
+    // 3️⃣ Get DB credentials from Key Vault
+    $sqlUser = getSecret("sql-username", $token, $vaultName);
+    $sqlPass = getSecret("sql-password", $token, $vaultName);
+
+} catch (Exception $e) {
+    die("<p style='color:red;'>❌ Failed to get secrets from Azure Key Vault: " . $e->getMessage() . "</p>");
+}
+
+// ==========================
+// 🔹 Connect to Azure SQL
+// ==========================
 $serverName = "tcp:mydemovm.database.windows.net,1433";
 $connectionOptions = array(
     "Database" => "azureadmin",
-    "Uid" => "azureadmin",
-    "PWD" => "Welcome@123456",
-    "Encrypt" => true,
+    "Uid"      => $sqlUser,
+    "PWD"      => $sqlPass,
+    "Encrypt"  => true,
     "TrustServerCertificate" => false
 );
 
 $conn = sqlsrv_connect($serverName, $connectionOptions);
 if (!$conn) {
-    die("<p style='color:red;'>❌ Connection failed: " . print_r(sqlsrv_errors(), true) . "</p>");
+    die("<p style='color:red;'>❌ SQL connection failed: " . print_r(sqlsrv_errors(), true) . "</p>");
 }
 
-// 1. Handle Delete
+// ==========================
+// 🔹 Portal Buttons
+// ==========================
+?>
+<form method="post">
+    <button class="btn" name="show_form" value="1">Add Employee</button>
+    <button class="btn" name="show_list" value="1">Employee List</button>
+</form>
+<?php
+
+// ==========================
+// 🔹 Delete Employee
+// ==========================
 if (isset($_POST['delete_btn']) && isset($_POST['delete_id'])) {
     $deleteId = $_POST['delete_id'];
     $deleteQuery = "DELETE FROM Employees WHERE EmployeeID = ?";
@@ -74,7 +128,9 @@ if (isset($_POST['delete_btn']) && isset($_POST['delete_id'])) {
                : "<p style='color:red;'>❌ Delete failed: " . print_r(sqlsrv_errors(), true) . "</p>";
 }
 
-// 2. Handle Insert
+// ==========================
+// 🔹 Add Employee
+// ==========================
 if (isset($_POST['submit'])) {
     $first = $_POST['first_name'];
     $last = $_POST['last_name'];
@@ -86,7 +142,9 @@ if (isset($_POST['submit'])) {
                : "<p style='color:red;'>❌ Insert failed: " . print_r(sqlsrv_errors(), true) . "</p>";
 }
 
-// 3. Show Add Form
+// ==========================
+// 🔹 Show Add Form
+// ==========================
 if (isset($_POST['show_form'])) {
     echo '
     <form method="post">
@@ -98,7 +156,9 @@ if (isset($_POST['show_form'])) {
     </form>';
 }
 
-// 4. Show Search Form
+// ==========================
+// 🔹 Search Form
+// ==========================
 echo '
 <form method="post">
     <h2>Search Employees</h2>
@@ -107,7 +167,9 @@ echo '
     <input class="btn" type="submit" name="search_btn" value="Search">
 </form>';
 
-// 5. Handle Search
+// ==========================
+// 🔹 Search Logic
+// ==========================
 if (isset($_POST['search_btn'])) {
     $lastname = $_POST['search_lastname'] ?? '';
     $department = $_POST['search_department'] ?? '';
@@ -120,7 +182,7 @@ if (isset($_POST['search_btn'])) {
         $params[] = $lastname;
     }
 
-        $stmt = sqlsrv_query($conn, $sql, $params);
+    $stmt = sqlsrv_query($conn, $sql, $params);
     if ($stmt !== false) {
         echo "<h2>Search Results</h2><table><tr><th>ID</th><th>First</th><th>Last</th><th>Department</th><th>Action</th></tr>";
         $found = false;
@@ -148,7 +210,9 @@ if (isset($_POST['search_btn'])) {
     }
 }
 
-// 6. Show Full List
+// ==========================
+// 🔹 Show Full List
+// ==========================
 if (isset($_POST['show_list']) || isset($_POST['submit']) || isset($_POST['delete_btn'])) {
     $sql = "SELECT EmployeeID, FirstName, LastName, Department FROM Employees";
     $stmt = sqlsrv_query($conn, $sql);
@@ -178,4 +242,3 @@ sqlsrv_close($conn);
 ?>
 </body>
 </html>
-
