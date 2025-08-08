@@ -50,7 +50,7 @@
     </form>
 
 <?php
-/ ==========================
+// ==========================
 // 🔹 Load Azure Key Vault Secrets
 // ==========================
 require 'vendor/autoload.php'; // Composer autoload (Guzzle)
@@ -226,3 +226,4 @@ sqlsrv_close($conn);
 ?>
 </body>
 </html>
+
