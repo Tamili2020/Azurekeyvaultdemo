@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Azure SQL Employee Portal (Key Vault Secured)</title>
+    <title>Azure SQL Employee Portal</title>
     <style>
         body {
             font-family: Arial;
@@ -41,10 +41,16 @@
     </style>
 </head>
 <body>
-<h1>Azure SQL Employee Portal 🔐</h1>
+    <h1>Azure SQL Employee Portal</h1>
+
+    <!-- Buttons -->
+    <form method="post">
+        <button class="btn" name="show_form" value="1">Add Employee</button>
+        <button class="btn" name="show_list" value="1">Employee List</button>
+    </form>
 
 <?php
-// ==========================
+/ ==========================
 // 🔹 Load Azure Key Vault Secrets
 // ==========================
 require 'vendor/autoload.php'; // Composer autoload (Guzzle)
@@ -107,19 +113,7 @@ if (!$conn) {
     die("<p style='color:red;'>❌ SQL connection failed: " . print_r(sqlsrv_errors(), true) . "</p>");
 }
 
-// ==========================
-// 🔹 Portal Buttons
-// ==========================
-?>
-<form method="post">
-    <button class="btn" name="show_form" value="1">Add Employee</button>
-    <button class="btn" name="show_list" value="1">Employee List</button>
-</form>
-<?php
-
-// ==========================
-// 🔹 Delete Employee
-// ==========================
+// 1. Handle Delete
 if (isset($_POST['delete_btn']) && isset($_POST['delete_id'])) {
     $deleteId = $_POST['delete_id'];
     $deleteQuery = "DELETE FROM Employees WHERE EmployeeID = ?";
@@ -128,9 +122,7 @@ if (isset($_POST['delete_btn']) && isset($_POST['delete_id'])) {
                : "<p style='color:red;'>❌ Delete failed: " . print_r(sqlsrv_errors(), true) . "</p>";
 }
 
-// ==========================
-// 🔹 Add Employee
-// ==========================
+// 2. Handle Insert
 if (isset($_POST['submit'])) {
     $first = $_POST['first_name'];
     $last = $_POST['last_name'];
@@ -142,9 +134,7 @@ if (isset($_POST['submit'])) {
                : "<p style='color:red;'>❌ Insert failed: " . print_r(sqlsrv_errors(), true) . "</p>";
 }
 
-// ==========================
-// 🔹 Show Add Form
-// ==========================
+// 3. Show Add Form
 if (isset($_POST['show_form'])) {
     echo '
     <form method="post">
@@ -156,9 +146,7 @@ if (isset($_POST['show_form'])) {
     </form>';
 }
 
-// ==========================
-// 🔹 Search Form
-// ==========================
+// 4. Show Search Form
 echo '
 <form method="post">
     <h2>Search Employees</h2>
@@ -167,9 +155,7 @@ echo '
     <input class="btn" type="submit" name="search_btn" value="Search">
 </form>';
 
-// ==========================
-// 🔹 Search Logic
-// ==========================
+// 5. Handle Search
 if (isset($_POST['search_btn'])) {
     $lastname = $_POST['search_lastname'] ?? '';
     $department = $_POST['search_department'] ?? '';
@@ -182,7 +168,7 @@ if (isset($_POST['search_btn'])) {
         $params[] = $lastname;
     }
 
-    $stmt = sqlsrv_query($conn, $sql, $params);
+        $stmt = sqlsrv_query($conn, $sql, $params);
     if ($stmt !== false) {
         echo "<h2>Search Results</h2><table><tr><th>ID</th><th>First</th><th>Last</th><th>Department</th><th>Action</th></tr>";
         $found = false;
@@ -210,9 +196,7 @@ if (isset($_POST['search_btn'])) {
     }
 }
 
-// ==========================
-// 🔹 Show Full List
-// ==========================
+// 6. Show Full List
 if (isset($_POST['show_list']) || isset($_POST['submit']) || isset($_POST['delete_btn'])) {
     $sql = "SELECT EmployeeID, FirstName, LastName, Department FROM Employees";
     $stmt = sqlsrv_query($conn, $sql);
