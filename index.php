@@ -57,10 +57,10 @@ require 'vendor/autoload.php'; // Composer autoload (Guzzle)
 use GuzzleHttp\Client;
 
 // Azure Key Vault + Azure AD app details
-$tenantId     = "2817eb0c-e3e7-4403-9e0b-171f475e2b9c";  #YOUR_TENANT_ID
-$clientId     = "e674564e-6c0f-432e-82ae-8d8e56400c31"; # YOUR_APP_REGISTRATION_CLIENT_ID
-$clientSecret = "c045b0fa-ebba-4241-86ce-6d9a2aa917c4"; # YOUR_APP_REGISTRATION_CLIENT_SECRET
-$vaultName    = "mydemokeyvaultwebapp"; // no https://, no .vault.azure.net , YOUR_KEY_VAULT_NAME_ONLY
+$tenantId     = 2817eb0c-e3e7-4403-9e0b-171f475e2b9c;  #YOUR_TENANT_ID
+$clientId     = e674564e-6c0f-432e-82ae-8d8e56400c31; # YOUR_APP_REGISTRATION_CLIENT_ID
+$clientSecret = c045b0fa-ebba-4241-86ce-6d9a2aa917c4; # YOUR_APP_REGISTRATION_CLIENT_SECRET
+$vaultName    = mydemokeyvaultwebapp; // no https://, no .vault.azure.net , YOUR_KEY_VAULT_NAME_ONLY
 
 try {
     // 1️⃣ Get Azure AD token
