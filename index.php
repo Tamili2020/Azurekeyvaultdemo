@@ -52,6 +52,12 @@
             margin: 10px;
             border-radius: 5px;
         }
+        code {
+            background-color: #f4f4f4;
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
     </style>
 </head>
 <body>
@@ -63,18 +69,50 @@ error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
 // ==========================
-// 🔹 Load Azure Key Vault Secrets
+// 🔹 cURL Helper Functions
 // ==========================
-require_once 'vendor/autoload.php'; // Use require_once to prevent multiple inclusions
 
-// Check if Guzzle is available
-if (!class_exists('GuzzleHttp\Client')) {
-    die("<div class='error'>❌ GuzzleHttp\Client class not found. Please install Guzzle via Composer: composer require guzzlehttp/guzzle</div>");
+function makeHttpRequest($url, $method = 'GET', $data = null, $headers = []) {
+    $ch = curl_init();
+    
+    curl_setopt($ch, CURLOPT_URL, $url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+    
+    if (!empty($headers)) {
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+    }
+    
+    if ($method === 'POST') {
+        curl_setopt($ch, CURLOPT_POST, true);
+        if ($data) {
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $data);
+        }
+    }
+    
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $error = curl_error($ch);
+    
+    curl_close($ch);
+    
+    if ($response === false) {
+        throw new Exception("cURL Error: $error");
+    }
+    
+    if ($httpCode >= 400) {
+        throw new Exception("HTTP Error $httpCode: $response");
+    }
+    
+    return $response;
 }
 
-use GuzzleHttp\Client;
-use GuzzleHttp\Exception\RequestException;
-use GuzzleHttp\Exception\ClientException;
+// ==========================
+// 🔹 Load Azure Key Vault Secrets
+// ==========================
 
 // Azure Key Vault + Azure AD app details
 $tenantId     = "2817eb0c-e3e7-4403-9e0b-171f475e2b9c";  // YOUR_TENANT_ID
@@ -89,38 +127,28 @@ $conn = null;
 
 try {
     // 1️⃣ Get Azure AD token
-    $http = new Client([
-        'timeout' => 30,
-        'connect_timeout' => 10
+    $tokenUrl = "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token";
+    $tokenData = http_build_query([
+        'grant_type'    => 'client_credentials',
+        'client_id'     => $clientId,
+        'client_secret' => $clientSecret,
+        'scope'         => 'https://vault.azure.net/.default'
     ]);
     
-    $response = $http->post("https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token", [
-        'form_params' => [
-            'grant_type'    => 'client_credentials',
-            'client_id'     => $clientId,
-            'client_secret' => $clientSecret,
-            'scope'         => 'https://vault.azure.net/.default'
-        ],
-        'headers' => [
-            'Content-Type' => 'application/x-www-form-urlencoded'
-        ]
-    ]);
+    $tokenHeaders = [
+        'Content-Type: application/x-www-form-urlencoded'
+    ];
     
-    $tokenData = json_decode($response->getBody()->getContents(), true);
+    $tokenResponse = makeHttpRequest($tokenUrl, 'POST', $tokenData, $tokenHeaders);
+    $tokenResult = json_decode($tokenResponse, true);
     
-    if (!isset($tokenData['access_token'])) {
-        throw new Exception('Access token not found in response: ' . print_r($tokenData, true));
+    if (!isset($tokenResult['access_token'])) {
+        throw new Exception('Access token not found in response: ' . print_r($tokenResult, true));
     }
     
-    $token = $tokenData['access_token'];
+    $token = $tokenResult['access_token'];
     echo "<div class='success'>✅ Successfully obtained Azure AD token</div>";
 
-} catch (RequestException $e) {
-    $errorMsg = "HTTP Request failed: " . $e->getMessage();
-    if ($e->hasResponse()) {
-        $errorMsg .= "\nResponse: " . $e->getResponse()->getBody()->getContents();
-    }
-    die("<div class='error'>❌ Failed to get Azure AD token: $errorMsg</div>");
 } catch (Exception $e) {
     die("<div class='error'>❌ Failed to get Azure AD token: " . $e->getMessage() . "</div>");
 }
@@ -128,20 +156,14 @@ try {
 // 2️⃣ Function to retrieve secret value
 function getSecret($secretName, $token, $vaultName) {
     try {
-        $http = new Client([
-            'timeout' => 30,
-            'connect_timeout' => 10
-        ]);
-        
         $url = "https://$vaultName.vault.azure.net/secrets/$secretName?api-version=7.3";
-        $response = $http->get($url, [
-            'headers' => [
-                'Authorization' => "Bearer $token",
-                'Content-Type' => 'application/json'
-            ]
-        ]);
+        $headers = [
+            "Authorization: Bearer $token",
+            "Content-Type: application/json"
+        ];
         
-        $data = json_decode($response->getBody()->getContents(), true);
+        $response = makeHttpRequest($url, 'GET', null, $headers);
+        $data = json_decode($response, true);
         
         if (!isset($data['value'])) {
             throw new Exception("Secret value not found for '$secretName': " . print_r($data, true));
@@ -149,13 +171,11 @@ function getSecret($secretName, $token, $vaultName) {
         
         return $data['value'];
         
-    } catch (ClientException $e) {
-        if ($e->getResponse()->getStatusCode() == 404) {
-            throw new Exception("Secret '$secretName' not found in Key Vault");
+    } catch (Exception $e) {
+        if (strpos($e->getMessage(), 'HTTP Error 404') !== false) {
+            throw new Exception("Secret '$secretName' not found in Key Vault '$vaultName'");
         }
         throw new Exception("Failed to get secret '$secretName': " . $e->getMessage());
-    } catch (RequestException $e) {
-        throw new Exception("HTTP error getting secret '$secretName': " . $e->getMessage());
     }
 }
 
@@ -176,7 +196,14 @@ try {
 
 // Check if SQL Server extension is loaded
 if (!extension_loaded('sqlsrv')) {
-    die("<div class='error'>❌ SQL Server extension (sqlsrv) is not loaded. Please install the Microsoft SQL Server PHP driver.</div>");
+    die("<div class='error'>❌ SQL Server extension (sqlsrv) is not loaded. Please install the Microsoft SQL Server PHP driver.<br><br>
+    <strong>Installation instructions:</strong><br>
+    <code>sudo pecl install sqlsrv</code><br>
+    <code>sudo pecl install pdo_sqlsrv</code><br><br>
+    Add to php.ini:<br>
+    <code>extension=sqlsrv</code><br>
+    <code>extension=pdo_sqlsrv</code>
+    </div>");
 }
 
 $serverName = "tcp:mydemovm.database.windows.net,1433";
@@ -194,11 +221,11 @@ $connectionOptions = array(
 $conn = sqlsrv_connect($serverName, $connectionOptions);
 if (!$conn) {
     $errors = sqlsrv_errors();
-    $errorMsg = "SQL connection failed:\n";
+    $errorMsg = "SQL connection failed:<br>";
     foreach ($errors as $error) {
-        $errorMsg .= "SQLSTATE: " . $error['SQLSTATE'] . "\n";
-        $errorMsg .= "Code: " . $error['code'] . "\n";
-        $errorMsg .= "Message: " . $error['message'] . "\n\n";
+        $errorMsg .= "<strong>SQLSTATE:</strong> " . $error['SQLSTATE'] . "<br>";
+        $errorMsg .= "<strong>Code:</strong> " . $error['code'] . "<br>";
+        $errorMsg .= "<strong>Message:</strong> " . $error['message'] . "<br><br>";
     }
     die("<div class='error'>❌ $errorMsg</div>");
 } else {
@@ -216,11 +243,11 @@ function executeQuery($conn, $query, $params = array()) {
     $stmt = sqlsrv_query($conn, $query, $params);
     if ($stmt === false) {
         $errors = sqlsrv_errors();
-        $errorMsg = "Query execution failed:\n";
+        $errorMsg = "Query execution failed:<br>";
         foreach ($errors as $error) {
-            $errorMsg .= "SQLSTATE: " . $error['SQLSTATE'] . "\n";
-            $errorMsg .= "Code: " . $error['code'] . "\n";
-            $errorMsg .= "Message: " . $error['message'] . "\n\n";
+            $errorMsg .= "<strong>SQLSTATE:</strong> " . $error['SQLSTATE'] . "<br>";
+            $errorMsg .= "<strong>Code:</strong> " . $error['code'] . "<br>";
+            $errorMsg .= "<strong>Message:</strong> " . $error['message'] . "<br><br>";
         }
         throw new Exception($errorMsg);
     }
@@ -234,8 +261,44 @@ function executeQuery($conn, $query, $params = array()) {
 <form method="post">
     <button class="btn" name="show_form" value="1">Add Employee</button>
     <button class="btn" name="show_list" value="1">Employee List</button>
+    <button class="btn" name="test_db" value="1">Test Database Connection</button>
 </form>
 <?php
+
+// ==========================
+// 🔹 Test Database Connection
+// ==========================
+if (isset($_POST['test_db'])) {
+    try {
+        // Test if the Employees table exists
+        $testQuery = "SELECT COUNT(*) as table_count FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Employees'";
+        $stmt = executeQuery($conn, $testQuery);
+        $result = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        
+        if ($result['table_count'] == 0) {
+            echo "<div class='error'>❌ Employees table does not exist. Please create it using:<br><br>
+            <code>
+            CREATE TABLE Employees (<br>
+            &nbsp;&nbsp;EmployeeID int IDENTITY(1,1) PRIMARY KEY,<br>
+            &nbsp;&nbsp;FirstName varchar(50) NOT NULL,<br>
+            &nbsp;&nbsp;LastName varchar(50) NOT NULL,<br>
+            &nbsp;&nbsp;Department varchar(100) NOT NULL<br>
+            );
+            </code></div>";
+        } else {
+            // Count employees
+            $countQuery = "SELECT COUNT(*) as emp_count FROM Employees";
+            $stmt = executeQuery($conn, $countQuery);
+            $result = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+            
+            echo "<div class='success'>✅ Database test successful!<br>
+            Employees table exists with " . $result['emp_count'] . " records.</div>";
+        }
+        
+    } catch (Exception $e) {
+        echo "<div class='error'>❌ Database test failed: " . $e->getMessage() . "</div>";
+    }
+}
 
 // ==========================
 // 🔹 Delete Employee
@@ -419,5 +482,31 @@ if ($conn) {
     sqlsrv_close($conn);
 }
 ?>
+
+<div style="margin-top: 50px; text-align: left; max-width: 800px; margin-left: auto; margin-right: auto;">
+    <h3>Setup Instructions:</h3>
+    <ol>
+        <li><strong>Install SQL Server PHP Driver:</strong>
+            <br><code>sudo pecl install sqlsrv pdo_sqlsrv</code>
+            <br>Add to php.ini: <code>extension=sqlsrv</code> and <code>extension=pdo_sqlsrv</code>
+        </li>
+        <li><strong>Create Database Table:</strong>
+            <pre><code>CREATE TABLE Employees (
+    EmployeeID int IDENTITY(1,1) PRIMARY KEY,
+    FirstName varchar(50) NOT NULL,
+    LastName varchar(50) NOT NULL,
+    Department varchar(100) NOT NULL
+);</code></pre>
+        </li>
+        <li><strong>Verify Azure Configuration:</strong>
+            <ul>
+                <li>Key Vault secrets: <code>sql-username</code>, <code>sql-password</code></li>
+                <li>Azure AD app has Key Vault access</li>
+                <li>SQL Server firewall allows your IP</li>
+            </ul>
+        </li>
+    </ol>
+</div>
+
 </body>
 </html>
